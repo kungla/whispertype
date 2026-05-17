@@ -15,7 +15,31 @@ set -euo pipefail
 
 # --- paths ------------------------------------------------------------------
 
-REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# When piped from curl (`curl ... | bash`), BASH_SOURCE is unset and $0 is "bash".
+# Detect that case and fetch the loose files we need (toggle script + systemd
+# unit) from GitHub into a tempdir we clean up on exit. Otherwise run from the
+# clone we're already sitting in.
+RAW_URL_BASE="${WHISPERTYPE_RAW_URL_BASE:-https://raw.githubusercontent.com/kungla/whispertype/main}"
+
+SCRIPT_SRC="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR=""
+if [ -f "$SCRIPT_SRC" ]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_SRC")" && pwd)"
+fi
+
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/bin/whispertype" ]; then
+  REPO_ROOT="$SCRIPT_DIR"
+else
+  REPO_ROOT="$(mktemp -d -t whispertype-install.XXXXXX)"
+  trap 'rm -rf "$REPO_ROOT"' EXIT
+  mkdir -p "$REPO_ROOT/bin" "$REPO_ROOT/share/systemd"
+  echo "  fetching whispertype assets from $RAW_URL_BASE ..."
+  curl -fsSL "$RAW_URL_BASE/bin/whispertype" -o "$REPO_ROOT/bin/whispertype"
+  curl -fsSL "$RAW_URL_BASE/share/systemd/whispertype-ydotoold.service" \
+    -o "$REPO_ROOT/share/systemd/whispertype-ydotoold.service"
+  chmod +x "$REPO_ROOT/bin/whispertype"
+fi
+
 WHISPERTYPE_HOME="${WHISPERTYPE_HOME:-$HOME/.local/share/whispertype}"
 WHISPER_DIR="$WHISPERTYPE_HOME/whisper.cpp"
 BIN_DIR="$HOME/.local/bin"
@@ -38,7 +62,7 @@ die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 install_apt_deps() {
   say "Installing system packages (apt)"
-  local pkgs=(ydotool alsa-utils libcanberra-gtk3-module cmake build-essential git curl xz-utils)
+  local pkgs=(ydotool alsa-utils libcanberra-gtk3-module cmake build-essential git curl xz-utils libblas-dev liblapack-dev)
   note "Will install: ${pkgs[*]}"
   sudo apt-get update
   sudo apt-get install -y "${pkgs[@]}"
