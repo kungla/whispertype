@@ -67,31 +67,49 @@ def rounded_rect(d, box, radius, fill=None, outline=None, width=1):
 
 
 def draw_editor_chrome(d):
-    # Top bar with traffic lights + title
+    # Editor window frame
     rounded_rect(d, (40, 40, W - 40, H - 60), 10, fill=PANEL, outline=PANEL_EDGE, width=1)
     # Title bar fill
     d.rectangle((41, 41, W - 41, 75), fill=(40, 44, 52))
     d.line((41, 75, W - 41, 75), fill=PANEL_EDGE, width=1)
-    # Traffic lights
-    for i, c in enumerate([(255, 95, 86), (255, 189, 46), (39, 201, 63)]):
-        cx = 62 + i * 22
-        d.ellipse((cx - 6, 52, cx + 6, 64), fill=c)
-    # Title
-    d.text((W // 2 - 50, 54), "notes.txt", font=f_title, fill=DIM)
+    # Centered title
+    title = "notes.txt"
+    tb = d.textbbox((0, 0), title, font=f_title)
+    d.text((W // 2 - (tb[2] - tb[0]) // 2, 54), title, font=f_title, fill=DIM)
+    # Linux/GNOME-style window controls on the right: minimize, maximize, close
+    btn_r = 9
+    btn_y = 58
+    gap = 26
+    cx_close = W - 40 - 16 - btn_r
+    cx_max = cx_close - gap
+    cx_min = cx_max - gap
+    btn_bg = (56, 62, 74)
+    for cx, kind in [(cx_min, "min"), (cx_max, "max"), (cx_close, "close")]:
+        d.ellipse((cx - btn_r, btn_y - btn_r, cx + btn_r, btn_y + btn_r), fill=btn_bg)
+        if kind == "min":
+            d.line((cx - 4, btn_y + 2, cx + 4, btn_y + 2), fill=DIM, width=2)
+        elif kind == "max":
+            d.rectangle((cx - 4, btn_y - 4, cx + 4, btn_y + 4), outline=DIM, width=1)
+        else:  # close
+            d.line((cx - 4, btn_y - 4, cx + 4, btn_y + 4), fill=DIM, width=2)
+            d.line((cx - 4, btn_y + 4, cx + 4, btn_y - 4), fill=DIM, width=2)
 
 
 def draw_status_chip(d, label, color, accent_color, pulse=0.0):
-    # Chip in top-right of editor title bar
-    x1 = W - 230
+    # Status chip on the LEFT of the title bar (Linux window-control convention puts buttons right)
+    text = f"whispertype - {label}"
+    longest = "whispertype - transcribing"
+    lb = d.textbbox((0, 0), longest, font=f_chip)
+    chip_w = 30 + (lb[2] - lb[0]) + 14  # dot pad + text + right pad
+    x1 = 52
+    x2 = x1 + chip_w
     y1 = 48
-    x2 = W - 60
     y2 = 70
     rounded_rect(d, (x1, y1, x2, y2), 11, fill=(50, 56, 66), outline=PANEL_EDGE)
-    # Dot
     dot_r = 5 + pulse * 1.5
     cx, cy = x1 + 16, (y1 + y2) // 2
     d.ellipse((cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r), fill=color)
-    d.text((x1 + 30, y1 + 3), f"whispertype - {label}", font=f_chip, fill=accent_color)
+    d.text((x1 + 30, y1 + 3), text, font=f_chip, fill=accent_color)
 
 
 def draw_caps_lock(d, pressed=False):
