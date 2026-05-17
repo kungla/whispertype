@@ -2,7 +2,7 @@
 
 Push-to-talk dictation for Linux Wayland: press Caps Lock, speak, press Caps Lock again — transcribed text appears in the focused window.
 
-`[demo.gif placeholder]`
+![whispertype demo](media/demo.gif)
 
 ## Why this exists
 
