@@ -97,6 +97,37 @@ amixer -c <card> cget numid=20
 
 If one says "Front Mic" and the other says "Rear Mic", your two ADC channels are recording from different physical jacks — they'll fight each other.
 
+Also verify both **Capture Switches** are on (one per ADC channel):
+
+```bash
+amixer -c <card> cget numid=22
+amixer -c <card> cget numid=24
+```
+
+If either is `values=off,off`, turn it on:
+
+```bash
+amixer -c <card> cset numid=24 on
+```
+
+A muted second channel halves the mono-mixed amplitude.
+
+### Dictation is much quieter than expected, even after fixing ALSA
+
+PipeWire has its **own** volume on top of ALSA. Run:
+
+```bash
+wpctl get-volume @DEFAULT_AUDIO_SOURCE@
+```
+
+If it reports something like `Volume: 0.10` (10%), bump it:
+
+```bash
+wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 0.75
+```
+
+You can also drag the input slider in **GNOME Settings → Sound → Input** — same control. This is independent of the ALSA gain settings above.
+
 ### Caps Lock does nothing
 
 The xkb option may not have applied to your live session yet. Log out and back in. Then verify:
@@ -118,6 +149,23 @@ tail "$XDG_RUNTIME_DIR/whispertype/log"
 You'll see lines like `raw: [...]` and `filtered: [...]`. If `raw` is a hallucination phrase ("Subtitles by Amara.org", "Thank you.", a lone "you") and `filtered` is empty, that's the silence-hallucination filter doing its job — and your real problem is the clipping fix above.
 
 If `raw` itself is empty, the whisper binary didn't produce output. Check that `~/.local/share/whispertype/whisper.cpp/build/bin/whisper-cli` exists and the model file is present and not zero-byte.
+
+### Transcription works but no text gets typed
+
+Check the input-injection daemon:
+
+```bash
+systemctl --user status whispertype-ydotoold.service
+ls -la "$XDG_RUNTIME_DIR/.ydotool_socket"
+```
+
+If the service is in `failed` state, restart it:
+
+```bash
+systemctl --user restart whispertype-ydotoold.service
+```
+
+If it keeps dying with `code=exited, status=2`, a stale socket file may be blocking startup. The unit file has an `ExecStartPre` that removes stale sockets, but if you upgraded from an older version it may not be in place — re-run the installer to refresh the unit.
 
 ## How it works
 

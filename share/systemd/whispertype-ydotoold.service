@@ -5,8 +5,18 @@ After=default.target
 
 [Service]
 Type=simple
+# Remove any stale socket left from a previous (uncleanly stopped) instance.
+# Without this, ydotoold can fail to bind, exit with status=2, and trip systemd's
+# restart-rate-limit before stabilising — turning a transient hiccup into a
+# permanently-failed service.
+ExecStartPre=-/usr/bin/rm -f %t/.ydotool_socket
 ExecStart=/usr/bin/ydotoold --socket-path=%t/.ydotool_socket --socket-own=%U:%G
 Restart=on-failure
+RestartSec=2
+# Disable systemd's "start request repeated too quickly" rate limiter — if the
+# daemon keeps dying we want to know about it via journalctl, not have systemd
+# silently mark the unit dead after 6 fast restarts.
+StartLimitBurst=0
 
 [Install]
 WantedBy=default.target
