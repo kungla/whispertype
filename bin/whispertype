@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# whispertype — push-to-talk dictation toggle for Linux Wayland desktops.
+#
+# Bound to the Menu keysym (e.g. via xkb caps:menu, so Caps Lock acts as Menu)
+# through a GNOME custom shortcut.
+#
+# First press : starts recording from the default ALSA mic.
+# Second press: stops recording, transcribes with whisper.cpp, and types
+#               the result into the focused window via ydotool.
+#
+# Configurable via environment variables:
+#   WHISPERTYPE_HOME   default: $HOME/.local/share/whispertype
+#   WHISPERTYPE_MODEL  default: $WHISPERTYPE_HOME/whisper.cpp/models/ggml-large-v3.bin
+#   WHISPERTYPE_BIN    default: $WHISPERTYPE_HOME/whisper.cpp/build/bin/whisper-cli
+#   WHISPERTYPE_LANG   default: en
+
+set -euo pipefail
+
+WHISPERTYPE_HOME="${WHISPERTYPE_HOME:-$HOME/.local/share/whispertype}"
+WHISPER="${WHISPERTYPE_BIN:-$WHISPERTYPE_HOME/whisper.cpp/build/bin/whisper-cli}"
+MODEL="${WHISPERTYPE_MODEL:-$WHISPERTYPE_HOME/whisper.cpp/models/ggml-large-v3.bin}"
+LANG_CODE="${WHISPERTYPE_LANG:-en}"
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/whispertype"
+PID_FILE="$STATE_DIR/arecord.pid"
+WAV_FILE="$STATE_DIR/clip.wav"
+LOG_FILE="$STATE_DIR/log"
+
+export YDOTOOL_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/.ydotool_socket"
+
+mkdir -p "$STATE_DIR"
+exec >>"$LOG_FILE" 2>&1
+echo "--- $(date -Iseconds) invoked ---"
+
+beep() {
+  # Non-blocking audio cue. Fails silently if canberra-gtk-play isn't installed.
+  canberra-gtk-play -i "$1" >/dev/null 2>&1 &
+  disown || true
+}
+
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  # --- STOP: kill arecord, transcribe, type ---------------------------------
+  PID=$(cat "$PID_FILE")
+  kill "$PID" 2>/dev/null || true
+  wait "$PID" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  beep complete
+
+  if [ ! -s "$WAV_FILE" ]; then
+    echo "empty wav, nothing to transcribe"
+    exit 0
+  fi
+
+  TEXT=$(
+    "$WHISPER" -m "$MODEL" -f "$WAV_FILE" \
+      --language "$LANG_CODE" --no-timestamps --no-prints \
+      --suppress-nst --no-speech-thold 0.6 2>/dev/null \
+      | sed 's/^[[:space:]]\+//; s/[[:space:]]\+$//' \
+      | tr '\n' ' ' \
+      | sed 's/[[:space:]]\+/ /g; s/^[[:space:]]*//; s/[[:space:]]*$//'
+  )
+  echo "raw: [$TEXT]"
+
+  # Filter known whisper silence hallucinations (training-data artifacts).
+  # These show up when the mic is clipping or the clip is effectively silent.
+  case "$TEXT" in
+    *"Amara.org"*|*"amara.org"*) TEXT="" ;;
+    "Thanks for watching"*|"Thank you for watching"*|"Thank you."*) TEXT="" ;;
+    "you"|"You"|".") TEXT="" ;;
+    "["*"]"|"("*")") TEXT="" ;;  # [music], (silence), etc.
+  esac
+  echo "filtered: [$TEXT]"
+
+  if [ -n "$TEXT" ]; then
+    # Trailing space so consecutive dictations don't collide.
+    ydotool type --next-delay 0 -- "$TEXT "
+  fi
+else
+  # --- START: record 16kHz mono mic into clip.wav ---------------------------
+  rm -f "$WAV_FILE"
+  arecord -q -f S16_LE -c 1 -r 16000 -t wav "$WAV_FILE" &
+  echo $! > "$PID_FILE"
+  beep bell
+  echo "recording pid=$(cat "$PID_FILE")"
+fi

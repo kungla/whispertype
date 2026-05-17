@@ -1,0 +1,12 @@
+[Unit]
+Description=whispertype ydotoold (user) — input injection daemon
+Documentation=https://github.com/kungla/whispertype
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ydotoold --socket-path=%t/.ydotool_socket --socket-own=%U:%G
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
