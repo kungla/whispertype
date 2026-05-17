@@ -62,7 +62,7 @@ die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 install_apt_deps() {
   say "Installing system packages (apt)"
-  local pkgs=(ydotool alsa-utils libcanberra-gtk3-module cmake build-essential git curl xz-utils libblas-dev liblapack-dev)
+  local pkgs=(ydotool alsa-utils libcanberra-gtk3-module cmake build-essential git curl xz-utils libblas-dev liblapack-dev pkg-config)
   note "Will install: ${pkgs[*]}"
   sudo apt-get update
   sudo apt-get install -y "${pkgs[@]}"
