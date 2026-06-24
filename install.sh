@@ -3,7 +3,9 @@
 #
 # Installs (or updates) the bits required for push-to-talk dictation:
 #   - whisper.cpp (cloned + built, CUDA when nvcc is present)
-#   - large-v3 ggml model (~3 GB)
+#   - a Whisper ggml model (default large-v3 ~3 GB; pick another with the
+#     interactive prompt or WHISPERTYPE_INSTALL_MODEL=<name>)
+#   - $HOME/.config/whispertype/config recording the chosen model
 #   - $HOME/.local/bin/whispertype toggle script
 #   - $HOME/.config/systemd/user/whispertype-ydotoold.service
 #   - GNOME: caps:menu xkb option (merged, not clobbered)
@@ -47,6 +49,8 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 SCRIPT_DEST="$BIN_DIR/whispertype"
 UNIT_NAME="whispertype-ydotoold.service"
 UNIT_DEST="$SYSTEMD_USER_DIR/$UNIT_NAME"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/whispertype"
+CONFIG_FILE="$CONFIG_DIR/config"
 
 GNOME_KEYBIND_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whispertype/"
 GNOME_KEYBIND_SCHEMA="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${GNOME_KEYBIND_PATH}"
@@ -134,19 +138,116 @@ build_whisper() {
   cd - >/dev/null
 }
 
-# --- 4. download model ------------------------------------------------------
+# --- 4. choose + download model ---------------------------------------------
 
-download_model() {
-  say "Downloading large-v3 model"
-  local model_path="$WHISPER_DIR/models/ggml-large-v3.bin"
-  if [ -s "$model_path" ]; then
-    note "model already present at $model_path, skipping"
+# Install-time model menu: "name|approx size|description". large-v3 stays first
+# and is the default. Any valid whisper.cpp model name also works (see
+# models/download-ggml-model.sh for the full list).
+MODEL_CHOICES=(
+  "large-v3|~2.9 GB|Most accurate. Full large model — best quality, slowest, biggest. (default)"
+  "large-v3-turbo|~1.5 GB|Newer & ~5-8x faster, slightly lower accuracy. Great for everyday dictation."
+  "large-v3-turbo-q5_0|~547 MB|Quantised turbo — smallest & fastest, minor extra accuracy loss."
+  "medium|~1.5 GB|Older mid-size model. Lower accuracy than large-v3; modest resources."
+  "small|~466 MB|Small & fast, noticeably lower accuracy. For low-RAM / no-GPU machines."
+)
+DEFAULT_MODEL="large-v3"
+
+print_model_choices() {
+  local i=1 entry name size desc
+  for entry in "${MODEL_CHOICES[@]}"; do
+    IFS='|' read -r name size desc <<<"$entry"
+    printf '    %d) %-21s %-9s %s\n' "$i" "$name" "$size" "$desc"
+    i=$((i + 1))
+  done
+}
+
+# Derive the model name (e.g. large-v3-turbo) from a WHISPERTYPE_MODEL path in an
+# existing config, so a plain reinstall keeps the model you already chose.
+config_model_name() {
+  [ -f "$CONFIG_FILE" ] || return 1
+  local line val
+  line="$(grep -E '^[[:space:]]*WHISPERTYPE_MODEL=' "$CONFIG_FILE" 2>/dev/null | tail -1)" || return 1
+  [ -n "$line" ] || return 1
+  val="${line#*=}"; val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+  val="$(basename "$val")"; val="${val#ggml-}"; val="${val%.bin}"
+  [ -n "$val" ] && printf '%s' "$val"
+}
+
+choose_model() {
+  # Precedence: explicit env var > existing config > interactive prompt > default.
+  if [ -n "${WHISPERTYPE_INSTALL_MODEL:-}" ]; then
+    MODEL_NAME="$WHISPERTYPE_INSTALL_MODEL"
+    note "model from WHISPERTYPE_INSTALL_MODEL: $MODEL_NAME"
     return 0
   fi
-  cd "$WHISPER_DIR"
-  bash models/download-ggml-model.sh large-v3
-  cd - >/dev/null
-  [ -s "$model_path" ] || die "model download failed: $model_path missing"
+  local existing
+  if existing="$(config_model_name)"; then
+    MODEL_NAME="$existing"
+    note "keeping model from existing config: $MODEL_NAME"
+    return 0
+  fi
+  if [ -t 0 ]; then
+    print_model_choices
+    printf '  Selection [1-%d] or model name, Enter for default (%s): ' \
+      "${#MODEL_CHOICES[@]}" "$DEFAULT_MODEL"
+    local reply name
+    read -r reply || reply=""
+    if [ -z "$reply" ]; then
+      MODEL_NAME="$DEFAULT_MODEL"
+    elif printf '%s' "$reply" | grep -qE '^[0-9]+$' \
+         && [ "$reply" -ge 1 ] && [ "$reply" -le "${#MODEL_CHOICES[@]}" ]; then
+      IFS='|' read -r name _ _ <<<"${MODEL_CHOICES[$((reply - 1))]}"
+      MODEL_NAME="$name"
+    else
+      MODEL_NAME="$reply"   # accept any valid whisper.cpp model name
+    fi
+  else
+    MODEL_NAME="$DEFAULT_MODEL"
+    note "Using default model: $DEFAULT_MODEL"
+    note "To pick another, re-run with WHISPERTYPE_INSTALL_MODEL=<name>. Choices:"
+    print_model_choices
+  fi
+}
+
+download_model() {
+  say "Choosing Whisper model"
+  choose_model
+  local model_path="$WHISPER_DIR/models/ggml-${MODEL_NAME}.bin"
+  if [ -s "$model_path" ]; then
+    note "model '$MODEL_NAME' already present, skipping download"
+  else
+    note "downloading model: $MODEL_NAME"
+    cd "$WHISPER_DIR"
+    bash models/download-ggml-model.sh "$MODEL_NAME"
+    cd - >/dev/null
+    [ -s "$model_path" ] || die "model download failed: $model_path missing (is '$MODEL_NAME' a valid whisper.cpp model? see models/download-ggml-model.sh)"
+  fi
+  MODEL_PATH="$model_path"
+  write_model_config
+}
+
+# Persist the chosen model so the toggle script (launched by the GNOME shortcut,
+# with no inherited env) uses it, and so it survives reinstalls. Only touches the
+# WHISPERTYPE_MODEL line — any other settings the user added are left intact.
+write_model_config() {
+  mkdir -p "$CONFIG_DIR"
+  if [ -f "$CONFIG_FILE" ] && grep -qE '^[[:space:]]*WHISPERTYPE_MODEL=' "$CONFIG_FILE"; then
+    local tmp
+    tmp="$(mktemp)"
+    sed "s|^[[:space:]]*WHISPERTYPE_MODEL=.*|WHISPERTYPE_MODEL=\"$MODEL_PATH\"|" "$CONFIG_FILE" >"$tmp"
+    mv "$tmp" "$CONFIG_FILE"
+  elif [ -f "$CONFIG_FILE" ]; then
+    printf 'WHISPERTYPE_MODEL="%s"\n' "$MODEL_PATH" >>"$CONFIG_FILE"
+  else
+    cat >"$CONFIG_FILE" <<EOF
+# whispertype config — sourced by ~/.local/bin/whispertype on every run.
+# Simple KEY=value lines. To switch models, change the path below (download
+# others with: bash $WHISPER_DIR/models/download-ggml-model.sh <name>).
+# Other knobs you may add: WHISPERTYPE_LANG, WHISPERTYPE_MAX_SECS, WHISPERTYPE_BIN.
+WHISPERTYPE_MODEL="$MODEL_PATH"
+EOF
+  fi
+  note "active model recorded in $CONFIG_FILE"
 }
 
 # --- 5. install toggle script ----------------------------------------------
@@ -281,6 +382,9 @@ print_success() {
 ================================================================
 All set. Press Caps Lock to start. Press it again to transcribe
 and type into the focused window.
+
+Model: ${MODEL_NAME:-large-v3}  (change any time by editing $CONFIG_FILE —
+see README.md "Changing the model").
 
 If Caps Lock doesn't trigger dictation yet, log out and back in
 ONCE so the compositor applies the Caps Lock -> Menu mapping.

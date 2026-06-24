@@ -17,6 +17,12 @@
 
 set -euo pipefail
 
+# Optional persistent config: simple KEY=value lines (e.g. WHISPERTYPE_MODEL=...).
+# Sourced first so settings survive reinstalls and apply to shortcut-launched runs,
+# where interactively-exported env vars aren't visible. See README "Changing the model".
+WHISPERTYPE_CONFIG="${WHISPERTYPE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/whispertype/config}"
+[ -f "$WHISPERTYPE_CONFIG" ] && . "$WHISPERTYPE_CONFIG"
+
 WHISPERTYPE_HOME="${WHISPERTYPE_HOME:-$HOME/.local/share/whispertype}"
 WHISPER="${WHISPERTYPE_BIN:-$WHISPERTYPE_HOME/whisper.cpp/build/bin/whisper-cli}"
 MODEL="${WHISPERTYPE_MODEL:-$WHISPERTYPE_HOME/whisper.cpp/models/ggml-large-v3.bin}"

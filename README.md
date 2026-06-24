@@ -33,7 +33,7 @@ The installer:
 1. Installs system packages (apt is automated; dnf/pacman print the package list for now).
 2. Clones `whisper.cpp` into `~/.local/share/whispertype/whisper.cpp`.
 3. Builds it. With CUDA if `nvcc` is found, else CPU+BLAS. **CUDA builds are capped at `-j2`** because `nvcc` + ggml-cuda template translation units each peak at several GB of RAM; a full `-j$(nproc)` build will OOM on most consumer machines. Don't loosen this without thinking.
-4. Downloads the `ggml-large-v3` model (~3 GB).
+4. Downloads a Whisper model — **`large-v3` by default** (~3 GB). Run the installer in a terminal for an interactive menu, or set `WHISPERTYPE_INSTALL_MODEL=<name>` (e.g. `large-v3-turbo`). The choice is saved to `~/.config/whispertype/config`; see [Changing the model](#changing-the-model).
 5. Installs `~/.local/bin/whispertype`.
 6. Installs and enables a user systemd unit for `ydotoold`.
 7. **Merges** `caps:menu` into your existing `org.gnome.desktop.input-sources xkb-options` (does not clobber other options).
@@ -59,13 +59,44 @@ If you forget the second press, recording auto-stops and is discarded after 120 
 
 | Knob | Default | Notes |
 |------|---------|-------|
-| Model file | `~/.local/share/whispertype/whisper.cpp/models/ggml-large-v3.bin` | Override with `WHISPERTYPE_MODEL=/path/to/other.bin`. Download other sizes with `bash ~/.local/share/whispertype/whisper.cpp/models/download-ggml-model.sh <size>` (e.g. `base.en`, `small`, `medium`). |
+| Model file | set in `~/.config/whispertype/config` (default `ggml-large-v3.bin`) | See [Changing the model](#changing-the-model) below. |
 | Whisper binary | `~/.local/share/whispertype/whisper.cpp/build/bin/whisper-cli` | Override with `WHISPERTYPE_BIN=...`. |
 | Language | `en` | Override with `WHISPERTYPE_LANG=de` (or any whisper-supported code). |
 | Max recording | `120` s | Safety cap: a forgotten recording auto-stops and is **discarded** after this many seconds (a distinct beep signals it — nothing is transcribed or typed). Override with `WHISPERTYPE_MAX_SECS=90`; set `0` to disable. |
 | Toggle script | `~/.local/bin/whispertype` | Edit this file to tweak whisper flags, filters, or beep cues. |
 | Keybinding | Caps Lock | Change via GNOME Settings -> Keyboard -> Custom Shortcuts -> "whispertype". |
 | Log | `$XDG_RUNTIME_DIR/whispertype/log` | One file, appended on every invocation. |
+
+### Changing the model
+
+whispertype reads its model path from `~/.config/whispertype/config` — a simple `KEY=value` file the toggle script sources on every run (so it survives reinstalls and works from the GNOME shortcut, where shell env vars wouldn't). The installer writes it for you with whichever model you picked.
+
+**At install time** — run `./install.sh` in a terminal for an interactive menu, or pre-select non-interactively:
+
+```bash
+WHISPERTYPE_INSTALL_MODEL=large-v3-turbo ./install.sh
+```
+
+| Model | Size | Trade-off |
+|-------|------|-----------|
+| `large-v3` (default) | ~2.9 GB | Most accurate; slowest, biggest. |
+| `large-v3-turbo` | ~1.5 GB | Newer, ~5–8× faster, slightly lower accuracy. |
+| `large-v3-turbo-q5_0` | ~547 MB | Quantised turbo: smallest & fastest, minor extra accuracy loss. |
+| `medium` / `small` | ~1.5 GB / ~466 MB | Older, lower accuracy; for low-RAM / no-GPU machines. |
+
+Any model name listed in `models/download-ggml-model.sh` works.
+
+**Later, without reinstalling** — download the model you want, then point the config at it:
+
+```bash
+# 1. fetch another model into the existing whisper.cpp checkout
+bash ~/.local/share/whispertype/whisper.cpp/models/download-ggml-model.sh large-v3-turbo
+
+# 2. edit ~/.config/whispertype/config so the model line reads:
+#    WHISPERTYPE_MODEL="$HOME/.local/share/whispertype/whisper.cpp/models/ggml-large-v3-turbo.bin"
+```
+
+The change takes effect on your next Caps Lock press — no restart needed. A plain re-run of the installer keeps whatever model your config already names.
 
 ## Troubleshooting
 
