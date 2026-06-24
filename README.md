@@ -41,7 +41,7 @@ The installer:
 
 Re-running the installer is safe. Every step checks current state first.
 
-You may need to log out and back in once for the xkb option to take effect.
+The installer tries to apply the `caps:menu` mapping to your live session automatically. If Caps Lock doesn't trigger dictation right after install, log out and back in **once** — every future login then applies it automatically. (A physical Menu key, if your keyboard has one, works immediately without logging out.)
 
 ## Usage
 
@@ -53,6 +53,8 @@ You may need to log out and back in once for the xkb option to take effect.
 
 That's the whole interface.
 
+If you forget the second press, recording auto-stops and is discarded after 120 s (configurable — see `WHISPERTYPE_MAX_SECS` below); nothing gets transcribed or typed. The clip itself lives only in `$XDG_RUNTIME_DIR` (RAM, wiped on reboot) and is deleted immediately after each transcription — no audio is left on disk or kept between dictations.
+
 ## Configuration
 
 | Knob | Default | Notes |
@@ -60,6 +62,7 @@ That's the whole interface.
 | Model file | `~/.local/share/whispertype/whisper.cpp/models/ggml-large-v3.bin` | Override with `WHISPERTYPE_MODEL=/path/to/other.bin`. Download other sizes with `bash ~/.local/share/whispertype/whisper.cpp/models/download-ggml-model.sh <size>` (e.g. `base.en`, `small`, `medium`). |
 | Whisper binary | `~/.local/share/whispertype/whisper.cpp/build/bin/whisper-cli` | Override with `WHISPERTYPE_BIN=...`. |
 | Language | `en` | Override with `WHISPERTYPE_LANG=de` (or any whisper-supported code). |
+| Max recording | `120` s | Safety cap: a forgotten recording auto-stops and is **discarded** after this many seconds (a distinct beep signals it — nothing is transcribed or typed). Override with `WHISPERTYPE_MAX_SECS=90`; set `0` to disable. |
 | Toggle script | `~/.local/bin/whispertype` | Edit this file to tweak whisper flags, filters, or beep cues. |
 | Keybinding | Caps Lock | Change via GNOME Settings -> Keyboard -> Custom Shortcuts -> "whispertype". |
 | Log | `$XDG_RUNTIME_DIR/whispertype/log` | One file, appended on every invocation. |
@@ -130,7 +133,7 @@ You can also drag the input slider in **GNOME Settings → Sound → Input** —
 
 ### Caps Lock does nothing
 
-The xkb option may not have applied to your live session yet. Log out and back in. Then verify:
+The `caps:menu` xkb option may not have applied to your live session yet. The installer attempts a live apply, but some GNOME versions defer xkb changes to the next login — so log out and back in **once** (a one-time step; every future login applies it automatically). A physical Menu key, if you have one, works without logging out. Then verify:
 
 ```bash
 gsettings get org.gnome.desktop.input-sources xkb-options

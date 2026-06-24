@@ -12,7 +12,8 @@
 #   WHISPERTYPE_HOME   default: $HOME/.local/share/whispertype
 #   WHISPERTYPE_MODEL  default: $WHISPERTYPE_HOME/whisper.cpp/models/ggml-large-v3.bin
 #   WHISPERTYPE_BIN    default: $WHISPERTYPE_HOME/whisper.cpp/build/bin/whisper-cli
-#   WHISPERTYPE_LANG   default: en
+#   WHISPERTYPE_LANG     default: en
+#   WHISPERTYPE_MAX_SECS default: 120  (seconds; 0 disables the auto-stop safety cap)
 
 set -euo pipefail
 
@@ -20,6 +21,7 @@ WHISPERTYPE_HOME="${WHISPERTYPE_HOME:-$HOME/.local/share/whispertype}"
 WHISPER="${WHISPERTYPE_BIN:-$WHISPERTYPE_HOME/whisper.cpp/build/bin/whisper-cli}"
 MODEL="${WHISPERTYPE_MODEL:-$WHISPERTYPE_HOME/whisper.cpp/models/ggml-large-v3.bin}"
 LANG_CODE="${WHISPERTYPE_LANG:-en}"
+MAX_SECS="${WHISPERTYPE_MAX_SECS:-120}"
 
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/whispertype"
 PID_FILE="$STATE_DIR/arecord.pid"
@@ -48,6 +50,7 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 
   if [ ! -s "$WAV_FILE" ]; then
     echo "empty wav, nothing to transcribe"
+    rm -f "$WAV_FILE"
     exit 0
   fi
 
@@ -75,11 +78,34 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     # Trailing space so consecutive dictations don't collide.
     ydotool type --next-delay 0 -- "$TEXT "
   fi
+
+  # Privacy: don't leave the recorded clip sitting in tmpfs between dictations.
+  rm -f "$WAV_FILE"
 else
   # --- START: record 16kHz mono mic into clip.wav ---------------------------
   rm -f "$WAV_FILE"
   arecord -q -f S16_LE -c 1 -r 16000 -t wav "$WAV_FILE" &
-  echo $! > "$PID_FILE"
+  apid=$!
+  echo "$apid" > "$PID_FILE"
   beep bell
-  echo "recording pid=$(cat "$PID_FILE")"
+  echo "recording pid=$apid (auto-stop cap ${MAX_SECS}s)"
+
+  # Safety watchdog: if the second press never comes, auto-stop and DISCARD the
+  # clip after MAX_SECS so a forgotten session can't record indefinitely. We only
+  # act if this exact recording is still active (PID file unchanged), so a stale
+  # watchdog can never kill a later session. Nothing is transcribed or typed; a
+  # distinct beep signals the auto-stop.
+  if [ "${MAX_SECS:-0}" -gt 0 ] 2>/dev/null; then
+    (
+      sleep "$MAX_SECS"
+      if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null)" = "$apid" ] \
+         && kill -0 "$apid" 2>/dev/null; then
+        kill "$apid" 2>/dev/null || true
+        rm -f "$PID_FILE" "$WAV_FILE"
+        beep dialog-warning
+        echo "--- auto-stopped after ${MAX_SECS}s cap; recording discarded ---"
+      fi
+    ) >/dev/null 2>&1 &
+    disown
+  fi
 fi

@@ -211,7 +211,30 @@ merge_xkb_caps_menu() {
 
   gsettings set org.gnome.desktop.input-sources xkb-options "$new"
   note "xkb-options now: $(gsettings get org.gnome.desktop.input-sources xkb-options)"
-  note "(may require log out / log in to take effect)"
+
+  # Best-effort: apply the new keymap *live* so a logout isn't required. GNOME
+  # Wayland normally only reads xkb-options at login; re-writing the input
+  # `sources` key forces mutter to rebuild the keymap now, on versions that
+  # honour it. Harmless where it's ignored — worst case the user logs out once.
+  apply_xkb_live
+}
+
+# Nudge the compositor to rebuild its keymap without a logout by re-writing the
+# input `sources` gsetting (toggle off, then restore). Only attempted when at
+# least one input source is configured; a silent no-op otherwise. This is
+# best-effort: some GNOME versions still defer xkb changes to the next login.
+apply_xkb_live() {
+  local sources
+  sources="$(gsettings get org.gnome.desktop.input-sources sources 2>/dev/null || echo "@as []")"
+  case "$sources" in
+    "@as []"|"[]"|"")
+      note "no configured input sources to nudge; live re-apply skipped"
+      return 0
+      ;;
+  esac
+  note "nudging mutter to apply caps:menu live (no logout) ..."
+  gsettings set org.gnome.desktop.input-sources sources "[]" 2>/dev/null || true
+  gsettings set org.gnome.desktop.input-sources sources "$sources" 2>/dev/null || true
 }
 
 # --- 8. GNOME custom shortcut ----------------------------------------------
@@ -259,8 +282,13 @@ print_success() {
 All set. Press Caps Lock to start. Press it again to transcribe
 and type into the focused window.
 
-If Caps Lock does nothing, log out and back in so xkb picks up
-the new option. See README.md "Troubleshooting" for more.
+If Caps Lock doesn't trigger dictation yet, log out and back in
+ONCE so the compositor applies the Caps Lock -> Menu mapping.
+This is a one-time step: every future login applies it
+automatically. (If your keyboard has a physical Menu key, it
+works right away, no logout needed.)
+
+See README.md "Troubleshooting" for more.
 ================================================================
 EOF
 }
